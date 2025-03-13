@@ -2,18 +2,26 @@
   "id": ["cunp-t-1", "cunp-t-2", "cunp-s-1", "cunp-s-2"],
   "cunp-t-1": {
     "name": "新標點和合本（繁體中文；神版）",
-    "format": 1
+    "lang": "zh-TW",
+    "format": 0,
+    "file": "bible/cunp-t-1.json"
   },
   "cunp-t-2": {
     "name": "新標點和合本（繁體中文；上帝版）",
-    "format": 1
+    "lang": "zh-TW",
+    "format": 1,
+    "file": "bible/cunp-t-2.json"
   },
   "cunp-s-1": {
     "name": "新标点和合本（简体中文；神版）",
-    "format": 2
+    "lang": "zh-CN",
+    "format": 2,
+    "file": "bible/cunp-s.csv"
   },
   "cunp-s-2": {
     "name": "新标点和合本（简体中文；上帝版）",
-    "format": 2
+    "lang": "zh-CN",
+    "format": 3,
+    "file": "bible/cunp-s.csv"
   }
 }
