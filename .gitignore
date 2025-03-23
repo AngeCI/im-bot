@@ -4,3 +4,7 @@ config.json
 groups.json
 users.json
 users-*
+history
+bible/*.csv
+bible/*.json
+bible/*.bin

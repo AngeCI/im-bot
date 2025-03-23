@@ -5,21 +5,22 @@ const fs = require("fs").promises;
 const path = require("path");
 const rootDir = path.join(__dirname, "../../");
 
-let readJsonFile = async function (filePath) {
+let readJsonFile = async function (filePath, encoding = "utf-8") {
   try {
     console.info(`Reading ${path.join(rootDir, filePath)}...`);
-    const data = await fs.readFile(path.join(rootDir, filePath), "utf-8");
-	return JSON.parse(data.replace(/(\/\/[^\n]*\n)|(\/\*[\s\S]*?\*\/)/g, ""));
+    const data = await fs.readFile(path.join(rootDir, filePath), encoding);
+	return JSON.parse(data.replace(/(\/\/[^\n]*\n)|(\/\*[\s\S]*?\*\/)/g, "")); // Clean up the “comments” before parsing JSON
   } catch (err) {
     console.error(`Error reading ${filePath}: `, err);
     return null;
-  }
+  };
 };
 
 (async () => {
 const config = await readJsonFile("config.json", "utf-8");
 
-let users, groups, emojiDict, stdb, bibleConfig, spamConfig; // JSON files
+// JSON files
+let users, groups, emojiDict, stdb, bibleConfig, spamConfig;
 let filePaths = [
   config.account_info_file,
   groups = config.group_info_file,
@@ -29,27 +30,62 @@ let filePaths = [
   spamConfig = config.spam_config_file
 ];
 let configVars = ["users", "groups", "emojiDict", "stdb", "bibleConfig", "spamConfig"];
-// let jsonData = await Promise.all(filePaths.map(file => readJsonFile(path.join(__dirname, file))));
 let i = 0;
 for await (const data of filePaths.map(file => readJsonFile(file, "utf-8"))) {
   eval(`${configVars[i]} = data;`);
   i++;
 };
 
-let i18n = {}; // translation strings
+// translation strings
+let i18n = {};
 config.language_list.forEach(async (e) => {
   i18n[e] = await readJsonFile(`src/res/${e}.json`, "utf-8");
-  // Object.defineProperty(i18n, e, { value: await readJsonFile(`src/res/${e}.json`, "utf-8") });
 });
-// console.info(i18n);
 
 const token = config.bot_tokens.telegram;
 const bot = new TelegramBot(token, { polling: true });
 
+// Get all whitelisted IDs
+const whitelistedGroups = [];
+for (let key in groups) {
+  whitelistedGroups.push(groups[key].telegram);
+};
+
+const whitelistedUsers = [];
+for (let key in users) {
+  whitelistedUsers.push(users[key].telegram);
+};
+
+// Whitelist checking
+let isWhitelisted = function (id, action) {
+  if (config.whitelist_enabled && whitelistedGroups.indexOf(id) == -1) {
+    return false;
+  } else {
+    return true;
+  };
+};
+
+let getTranslationString = function (key, lang) {
+  if (i18n[lang][key]) {
+    return ;
+  } else {
+    return key;
+  };
+};
+
+let replyParam = function (id) {
+  return {
+    parse_mode: "MarkdownV2",
+    reply_parameters: {
+      message_id: id
+    }
+  };
+};
+
 // Start command
 bot.onText(/\/start/, (msg) => {
   config.tg_start_msg.forEach((e) => {
-    bot.sendMessage(msg.chat.id, e, { parse_mode: "MarkdownV2", reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, e, replyParam(msg.message_id));
   });
 });
 
@@ -62,20 +98,20 @@ bot.onText(/\/help/, (msg) => {
 
 // ID command
 bot.onText(/\/id/, (msg) => {
-  bot.sendMessage(msg.chat.id, `ID: ${msg.chat.id}`, { reply_parameters: {message_id: msg.message_id} });
+  bot.sendMessage(msg.chat.id, `ID: ${msg.chat.id}`, replyParam(msg.message_id));
 });
 
 // Echo command
 bot.onText(/\/echo/, (msg) => {
   let replyMsg = msg?.reply_to_message;
   if (replyMsg?.text) {
-    bot.sendMessage(msg.chat.id, msg.text, { reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, msg.text, replyParam(msg.message_id));
   } else if (replyMsg?.sticker) {
-    bot.sendSticker(msg.chat.id, replyMsg.sticker.file_id, { reply_parameters: {message_id: msg.message_id} });
+    bot.sendSticker(msg.chat.id, replyMsg.sticker.file_id, replyParam(msg.message_id));
   } else if (replyMsg?.photo) {
-    bot.sendPhoto(msg.chat.id, replyMsg.photo[1].file_id, { reply_parameters: {message_id: msg.message_id} });
+    bot.sendPhoto(msg.chat.id, replyMsg.photo[1].file_id, replyParam(msg.message_id));
   } else {
-    bot.sendMessage(msg.chat.id, "No supported formats detected.", { parse_mode: "MarkdownV2", reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, "No supported formats detected.", replyParam(msg.message_id));
   }
 });
 
@@ -84,14 +120,14 @@ bot.onText(/\/getfileid/, (msg) => {
   let replyMsg = msg?.reply_to_message;
   if (replyMsg) {
     if (replyMsg?.sticker) {
-      bot.sendMessage(msg.chat.id, replyMsg.sticker.file_id, { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, replyMsg.sticker.file_id, replyParam(msg.message_id));
     } else if (replyMsg?.photo) {
-      bot.sendMessage(msg.chat.id, replyMsg.photo[1].file_id, { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, replyMsg.photo[1].file_id, replyParam(msg.message_id));
     } else {
-      bot.sendMessage(msg.chat.id, "No picture or sticker is detected.", { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, "No picture or sticker is detected.", replyParam(msg.message_id));
     }
   } else {
-    bot.sendMessage(msg.chat.id, "No parameter provided. Use reply to supply a parameter.", { reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, "No parameter provided. Use reply to supply a parameter.", replyParam(msg.message_id));
   }
 });
 
@@ -111,14 +147,14 @@ bot.onText(/\/flag/, (msg, text) => {
     // code = flagCorrect(code);
 
     if (isFlagConverted) {
-      bot.sendMessage(msg.chat.id, code, { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, code, replyParam(msg.message_id));
     } else if (isFlagCorrected) {
-      bot.sendMessage(msg.chat.id, `${flagCalculate(code)} = code`, { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, `${flagCalculate(code)} = code`, replyParam(msg.message_id));
     } else {
-      bot.sendMessage(msg.chat.id, flagCalculate(code), { reply_parameters: {message_id: msg.message_id} });
+      bot.sendMessage(msg.chat.id, flagCalculate(code), replyParam(msg.message_id));
     }
   } else {
-    bot.sendMessage(msg.chat.id, "No parameter provided. Supply a parameter right after the command.", { reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, "No parameter provided. Supply a parameter right after the command.", replyParam(msg.message_id));
   }
 
   isFlagCorrected = false;
@@ -131,7 +167,7 @@ bot.onText(/\/sendtext/, (msg, text) => {
   if (args.length > 1) {
     bot.sendMessage(args[0], args[1]);
   } else {
-    bot.sendMessage(msg.chat.id, "No parameter provided. Supply two parameters right after the command.", { reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, "No parameter provided. Supply two parameters right after the command.", replyParam(msg.message_id));
   }
 });
 
@@ -141,13 +177,13 @@ bot.onText(/\/sendtext/, (msg, text) => {
   if (args.length > 1) {
     bot.sendSticker(args[0], args[1]);
   } else {
-    bot.sendMessage(msg.chat.id, "No parameter provided. Supply two parameters right after the command.", { reply_parameters: {message_id: msg.message_id} });
+    bot.sendMessage(msg.chat.id, "No parameter provided. Supply two parameters right after the command.", replyParam(msg.message_id));
   }
 });
 
 // Emoji list command
 bot.onText(/\/emojilist/, (msg) => {
-  bot.sendMessage(msg.chat.id, Object.keys(emojiDict).join(""), { reply_parameters: {message_id: msg.message_id} });
+  bot.sendMessage(msg.chat.id, Object.keys(emojiDict).join(""), replyParam(msg.message_id));
 });
 
 // Emoji dictionary command
@@ -164,25 +200,47 @@ bot.onText(/\/emojidict/, (msg) => {
     }
   });
 
-  console.info(emoji);
   let output = "";
   emoji.forEach((e) => {
     let emojiDictEntry = emojiDict[e];
     let codepoint = emojiDictEntry.codepoint,
       name = emojiDictEntry.name,
-      shortcode = emojiDictEntry.shortcode,
+      shortcode = emojiDictEntry.shortcode.join(", "),
       description = emojiDictEntry.description;
-    output += eval("`" + config.emoji_dict_template + "`");
+    output += eval("`" + config.emoji_dict_template + "`").replace(/_/g, "\\_");
   });
 
-  bot.sendMessage(msg.chat.id, output, { parse_mode: "MarkdownV2", reply_parameters: {message_id: msg.message_id} });
+  bot.sendMessage(msg.chat.id, output, replyParam(msg.message_id));
 });
 
 // Chat history logging
 let appendToLogFile = function (filePath, text) {
-  fs.appendFile(filePath, `${text}\n`, "utf-8", (err) => {
-    if (err)
-      console.error("Error appending to file: ", err);
+  fs.access(filePath, fs.constants.F_OK)
+  .then(() => {
+    fs.appendFile(filePath, `${text}\n`, "utf-8");
+  })
+  .catch((err) => {
+    if (err.code === "ENOENT") {
+      fs.writeFile(filePath, `${text}\n`, "utf-8"); // File not exist, create the file when writing
+    } else {
+      console.error(`Error appending to file ${filePath}: `, err);
+    };
   });
 };
+
+bot.on("error", (err) => {
+  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+});
+
+bot.on("polling_error", (err) => {
+  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+});
+
+bot.on("webhook_error", (err) => {
+  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+});
+
+/*bot.on("message", async (msg) => {
+  await appendToLogFile(path.join(config.chat_history_directory, `${msg.chat.id}.json`), JSON.stringify());
+});*/
 })();
