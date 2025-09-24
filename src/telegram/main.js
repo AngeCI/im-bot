@@ -9,7 +9,7 @@ let readJsonFile = async function (filePath, encoding = "utf-8") {
   try {
     console.info(`Reading ${path.join(rootDir, filePath)}...`);
     const data = await fs.readFile(path.join(rootDir, filePath), encoding);
-	return JSON.parse(data.replace(/(\/\/[^\n]*\n)|(\/\*[\s\S]*?\*\/)/g, "")); // Clean up the “comments” before parsing JSON
+    return JSON.parse(data.replace(/(\/\/[^\n]*\n)|(\/\*[\s\S]*?\*\/)/g, "")); // Clean up the “comments” before parsing JSON
   } catch (err) {
     console.error(`Error reading ${filePath}: `, err);
     return null;
@@ -45,20 +45,38 @@ config.language_list.forEach(async (e) => {
 const token = config.bot_tokens.telegram;
 const bot = new TelegramBot(token, { polling: true });
 
-// Get all whitelisted IDs
+// Get all whitelisted IDs & compile reverse look-up tables for users and groups
+const tgReverseLookupTable = {};
 const whitelistedGroups = [];
 for (let key in groups) {
   whitelistedGroups.push(groups[key].telegram);
+  tgReverseLookupTable[groups[key].telegram] = key;
 };
 
 const whitelistedUsers = [];
-for (let key in users) {
-  whitelistedUsers.push(users[key].telegram);
+for (let key in users.users) {
+  whitelistedUsers.push(users.users[key].telegram);
+  tgReverseLookupTable[users.users[key].telegram] = key;
 };
+for (let key in users.bots) {
+  whitelistedUsers.push(users.bots[key].telegram);
+  tgReverseLookupTable[users.bots[key].telegram] = key;
+};
+
+// console.info(tgReverseLookupTable);
 
 // Whitelist checking
 let isWhitelisted = function (id, action) {
-  if (config.whitelist_enabled && whitelistedGroups.indexOf(id) == -1) {
+  if (config.whitelist_enabled && whitelistedGroups.indexOf(id) == -1 && whitelistedUsers.indexOf(id) == -1) {
+    return false;
+  } else {
+    return true;
+  };
+};
+
+// Strict whitelist checking
+let isStrictWhitelisted = function (id, action) {
+  if (config.whitelist_enabled && whitelistedGroups.indexOf(id) == -1 && whitelistedUsers.indexOf(id) == -1) {
     return false;
   } else {
     return true;
@@ -67,9 +85,18 @@ let isWhitelisted = function (id, action) {
 
 let getTranslationString = function (key, lang) {
   if (i18n[lang][key]) {
-    return ;
+    return i18n[lang][key];
   } else {
     return key;
+  };
+};
+
+let getChatLang = function (id) {
+  let lang = whitelistedGroups[tgReverseLookupTable[id]]?.lang;
+  if (lang && config.language_list.indexOf(lang) != -1) {
+    return lang;
+  } else {
+    return "en";
   };
 };
 
@@ -81,6 +108,30 @@ let replyParam = function (id) {
     }
   };
 };
+
+let checkWhitelistAndReply = function (id, action, content, params) {
+  if (isWhitelisted(id, action)) {
+    bot.sendMessage(id, content, replyParam(id));
+  } else {
+    bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(id)), replyParam(id));
+  };
+};
+let checkStrictWhitelistAndReply = function (id, action, content, params) {
+  if (isStrictWhitelisted(id, action)) {
+    bot.sendMessage(id, content, replyParam(id));
+  } else {
+    bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(id)), replyParam(id));
+  };
+};
+
+/*
+bot.on("message", (msg) => {
+  if (isWhitelisted(msg.chat.id)) {
+  } else {
+    return;
+  };
+});
+*/
 
 // Start command
 bot.onText(/\/start/, (msg) => {
@@ -192,7 +243,7 @@ bot.onText(/\/emojidict/, (msg) => {
   Object.keys(emojiDict).forEach((e) => { // Find emoji in the command first.
     if (msg?.text.match(e)) {
       emoji.push(e);
-	} else if (msg?.reply_to_message?.text.match(e)) { // If no match is found, then try to find an emoji in the replies.
+    } else if (msg?.reply_to_message?.text.match(e)) { // If no match is found, then try to find an emoji in the replies.
       emoji.push(e);
     } else {
       // bot.sendMessage(msg.chat.id, i18nStr[emoji_dict.not_found], { parse_mode: "MarkdownV2", reply_parameters: {message_id: msg.message_id} });
@@ -203,6 +254,9 @@ bot.onText(/\/emojidict/, (msg) => {
   let output = "";
   emoji.forEach((e) => {
     let emojiDictEntry = emojiDict[e];
+    emojiDictEntry.shortcode.forEach((e, i) => {
+      emojiDictEntry.shortcode[i] = "`:" + e + ":`";
+    });
     let codepoint = emojiDictEntry.codepoint,
       name = emojiDictEntry.name,
       shortcode = emojiDictEntry.shortcode.join(", "),
@@ -214,33 +268,29 @@ bot.onText(/\/emojidict/, (msg) => {
 });
 
 // Chat history logging
-let appendToLogFile = function (filePath, text) {
-  fs.access(filePath, fs.constants.F_OK)
-  .then(() => {
-    fs.appendFile(filePath, `${text}\n`, "utf-8");
-  })
-  .catch((err) => {
-    if (err.code === "ENOENT") {
-      fs.writeFile(filePath, `${text}\n`, "utf-8"); // File not exist, create the file when writing
-    } else {
-      console.error(`Error appending to file ${filePath}: `, err);
-    };
-  });
+let appendToLogFile = async function (filePath, text) {
+  try {
+    await fs.mkdir(path.join(rootDir, path.dirname(filePath)), { recursive: true });
+    await fs.appendFile(path.join(rootDir, filePath), `${text}\n`, { encoding: "utf-8", flag: "a" });
+    console.debug(`Successfully wrote to file: ${filePath}`);
+  } catch (err) {
+    console.error(`Error writing to file ${filePath}: `, err);
+  };
 };
 
 bot.on("error", (err) => {
-  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+  console.error(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
 });
 
 bot.on("polling_error", (err) => {
-  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+  console.error(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
 });
 
 bot.on("webhook_error", (err) => {
-  console.log(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
+  console.error(`${err}: ${err.code}, ${err.response}, ${err.response.body}`);
 });
 
-/*bot.on("message", async (msg) => {
-  await appendToLogFile(path.join(config.chat_history_directory, `${msg.chat.id}.json`), JSON.stringify());
-});*/
+bot.on("message", async (msg) => {
+  await appendToLogFile(path.join(config.chat_history_directory, `${msg.chat.id}.json`), JSON.stringify(msg));
+});
 })();
