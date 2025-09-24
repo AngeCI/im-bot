@@ -92,7 +92,7 @@ let getTranslationString = function (key, lang) {
 };
 
 let getChatLang = function (id) {
-  let lang = whitelistedGroups[tgReverseLookupTable[id]]?.lang;
+  let lang = groups[tgReverseLookupTable[id]]?.lang;
   if (lang && config.language_list.indexOf(lang) != -1) {
     return lang;
   } else {
@@ -109,18 +109,69 @@ let replyParam = function (id) {
   };
 };
 
-let checkWhitelistAndReply = function (id, action, content, params) {
-  if (isWhitelisted(id, action)) {
-    bot.sendMessage(id, content, replyParam(id));
+let checkWhitelistAndReply = function (msg, action, content, params) {
+  if (isWhitelisted(msg.chat.id, action)) {
+    if (action != "debug_commands" || isStrictWhitelisted(msg.chat.id)) { // Check a stricter whitelist before processing debug commands.
+      bot.sendMessage(msg.chat.id, content, replyParam(msg.message_id));
+    } else { // Refuse to execute debug commands.
+      bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), replyParam(msg.message_id));
+    };
   } else {
-    bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(id)), replyParam(id));
+    bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), replyParam(msg.message_id));
   };
 };
-let checkStrictWhitelistAndReply = function (id, action, content, params) {
-  if (isStrictWhitelisted(id, action)) {
-    bot.sendMessage(id, content, replyParam(id));
+
+let checkWhitelistAndMassReply = function (msg, action, content, params) {
+  if (isWhitelisted(msg.chat.id, action)) {
+    if (action != "debug_commands" || isStrictWhitelisted(msg.chat.id)) { // Check a stricter whitelist before processing debug commands.
+      content.forEach((e) => {
+        bot.sendMessage(msg.chat.id, e, replyParam(msg.message_id));
+      });
+    } else { // Refuse to execute debug commands.
+      bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), replyParam(msg.message_id));
+    };
   } else {
-    bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(id)), replyParam(id));
+    bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), replyParam(msg.message_id));
+  };
+};
+
+let checkWhitelistAndNotReply = function (msg, action, content, params) {
+  if (isWhitelisted(msg.chat.id, action)) {
+    if (action != "debug_commands" || isStrictWhitelisted(msg.chat.id)) { // Check a stricter whitelist before processing debug commands.
+      bot.sendMessage(msg.chat.id, content, { parse_mode: "MarkdownV2" });
+    } else { // Refuse to execute debug commands.
+      bot.sendMessage(id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), params);
+    };
+  } else {
+    bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), params);
+  };
+};
+
+let checkWhitelistAndMassNotReply = function (msg, action, content, params) {
+  if (isWhitelisted(msg.chat.id, action)) {
+    if (action != "debug_commands" || isStrictWhitelisted(msg.chat.id)) { // Check a stricter whitelist before processing debug commands.
+      content.forEach((e) => {
+        bot.sendMessage(msg.chat.id, e, { parse_mode: "MarkdownV2" });
+      });
+    } else { // Refuse to execute debug commands.
+      bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), params);
+    };
+  } else {
+    bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), params);
+  };
+};
+
+let checkWhitelistAndProceed = function (msg, action, passFunc, rejectFunc = (msg) => {
+  bot.sendMessage(msg.chat.id, getTranslationString("general.action_not_allowed", getChatLang(msg.chat.id)), params);
+}) {
+  if (isWhitelisted(msg.chat.id, action)) {
+    if (action != "debug_commands" || isStrictWhitelisted(msg.chat.id)) { // Check a stricter whitelist before processing debug commands.
+      passFunc(msg);
+    } else { // Refuse to execute debug commands.
+      rejectFunc(msg);
+    };
+  } else {
+    rejectFunc(msg);
   };
 };
 
@@ -133,25 +184,23 @@ bot.on("message", (msg) => {
 });
 */
 
+/** GENERAL COMMANDS **/
 // Start command
 bot.onText(/\/start/, (msg) => {
-  config.tg_start_msg.forEach((e) => {
-    bot.sendMessage(msg.chat.id, e, replyParam(msg.message_id));
-  });
+  checkWhitelistAndMassReply(msg, "general", config.tg_start_msg);
 });
 
 // Help command
 bot.onText(/\/help/, (msg) => {
-  config.tg_help_msg.forEach((e) => {
-    bot.sendMessage(msg.chat.id, e, { parse_mode: "MarkdownV2" });
-  });
+  checkWhitelistAndMassNotReply(msg, "general", config.tg_help_msg);
 });
 
 // ID command
 bot.onText(/\/id/, (msg) => {
-  bot.sendMessage(msg.chat.id, `ID: ${msg.chat.id}`, replyParam(msg.message_id));
+  bot.sendMessage(msg.chat.id, `Chat ID: ${msg.chat.id}\nUser ID: ${msg.from.id}`.replaceAll("-", "\\-"), replyParam(msg.message_id));
 });
 
+/** DEBUG COMMANDS **/
 // Echo command
 bot.onText(/\/echo/, (msg) => {
   let replyMsg = msg?.reply_to_message;
@@ -214,7 +263,7 @@ bot.onText(/\/flag/, (msg, text) => {
 
 // Send text command
 bot.onText(/\/sendtext/, (msg, text) => {
-  args = text.split(" ").splice(0, 1);
+  let args = text.split(" ").splice(0, 1);
   if (args.length > 1) {
     bot.sendMessage(args[0], args[1]);
   } else {
@@ -224,7 +273,7 @@ bot.onText(/\/sendtext/, (msg, text) => {
 
 // Send sticker command
 bot.onText(/\/sendtext/, (msg, text) => {
-  args = text.split(" ").splice(0, 1);
+  let args = text.split(" ").splice(0, 1);
   if (args.length > 1) {
     bot.sendSticker(args[0], args[1]);
   } else {
@@ -232,9 +281,77 @@ bot.onText(/\/sendtext/, (msg, text) => {
   }
 });
 
+// Forward command
+// Todo
+
+// Forward-To command
+// Todo
+
+/** CHECKUSER COMMANDS **/
+let outputUserInfo = function (id, platform, wiki = false) {
+  let str = "";
+  switch (platform) {
+    case 0: { // Telegram
+      let user = users[tgReverseLookupTable[id]];
+	  if (user.telegram_username) {
+	    str += `Telegram: [${user.telegram}](tg://user?id=${user.telegram})\n`;
+	  } else {
+	    str += `Telegram: [${user.telegram}](tg://user?id=${user.telegram}) (@${user.telegram_username})\n`;
+	  };	  
+	  if (user.discord) {
+	    str += `Discord: ${user.discord} (${user.discord_username})\n`;
+	  };	  
+	  /*if (wiki) {
+	    str += ``;
+	  };*/
+	  return str;
+      break;
+    };
+    case 1: { // Discord
+      // Todo
+      break;
+    };
+    case 2: { // Matrix
+      // Todo
+      break;
+    };
+  };
+};
+
+bot.onText(/\/checkuser/, (msg) => {
+  checkWhitelistAndProceed(msg, "emoji_dict", () => {
+    let userId = text.split(" ")[1];
+    let id; // Processed ID
+    let wiki = groups[tgReverseLookupTable[msg.chat.id]].user_wiki_info;
+    console.debug(`${userId}, ${wiki}`);
+    if (userId.match(/^\d+$/)){ // plain Telegram UID
+      id = parseInt(userId);
+      if (id < Number.MAX_SAFE_INTEGER) {
+        bot.sendMessage(msg.chat.id, outputUserInfo(id, 0, wiki), replyParam(msg.message_id));
+      } else { // Larger than Number.MAX_SAFE_INTEGER, treat as Discord UID
+        bot.sendMessage(msg.chat.id, outputUserInfo(id, 1, wiki), replyParam(msg.message_id));
+      };
+    } else if (userId.match(/^tg\d+$/)) { // Telegram UID with “tg” prefix
+      bot.sendMessage(msg.chat.id, outputUserInfo(parseInt(userId.match(/^tg(\d+)$/)[1]), 0, wiki), replyParam(msg.message_id));
+    } else if (userId.match(/^tgx[\dABCDEFabcdef]+$/)) { // Telegram UID with “tgx” prefix
+      bot.sendMessage(msg.chat.id, outputUserInfo(parseInt("0x" + userId.match(/^tgx(\d+)$/)[1]), 0, wiki), replyParam(msg.message_id));
+    } else if (userId.match(/^dc\d+$/)) { // Discord UID with “dc” prefix
+      bot.sendMessage(msg.chat.id, outputUserInfo(parseInt(userId.match(/^dc(\d+)$/)[1]), 1, wiki), replyParam(msg.message_id));
+    } else if (userId.match(/^dcx[\dABCDEFabcdef]+$/)) { // Discord UID with “dcx” prefix
+      bot.sendMessage(msg.chat.id, outputUserInfo(parseInt("0x" + userId.match(/^dcx(\d+)$/)[1]), 1, wiki), replyParam(msg.message_id));
+    } else if (userId.match(/^.+:.+$/)) { // Matrix UID
+      id = userId[0] == "@" ? userId : "@" + userId;
+      bot.sendMessage(msg.chat.id, outputUserInfo(id, 2, wiki), replyParam(msg.message_id));
+    } else {
+      bot.sendMessage(msg.chat.id, "Cannot parse user ID.", replyParam(msg.message_id));
+    };
+  });
+});
+
+/** EMOJI DICTIONARY COMMANDS **/
 // Emoji list command
 bot.onText(/\/emojilist/, (msg) => {
-  bot.sendMessage(msg.chat.id, Object.keys(emojiDict).join(""), replyParam(msg.message_id));
+  checkWhitelistAndReply(msg, "emoji_dict", Object.keys(emojiDict).join(""));
 });
 
 // Emoji dictionary command
@@ -272,9 +389,9 @@ let appendToLogFile = async function (filePath, text) {
   try {
     await fs.mkdir(path.join(rootDir, path.dirname(filePath)), { recursive: true });
     await fs.appendFile(path.join(rootDir, filePath), `${text}\n`, { encoding: "utf-8", flag: "a" });
-    console.debug(`Successfully wrote to file: ${filePath}`);
+    console.debug(`Successfully wrote to file ${path.join(rootDir, filePath)}`);
   } catch (err) {
-    console.error(`Error writing to file ${filePath}: `, err);
+    console.error(`Error writing to file ${path.join(rootDir, filePath)}: `, err);
   };
 };
 
